@@ -238,7 +238,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             </div>
             <p class="support-body">Leonne's Daily Post is a site I designed with the help of <a href="https://claude.ai" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none;">Claude.ai</a> for my wife — a chronic migraine sufferer with ADHD — who wanted a better way to keep up with the world without the endless doomscroll, visual clutter, and distracting ads that come with most news sites.</p>
             <p class="support-body">The result is a calm, curated daily digest: a handful of stories worth reading, presented in a clean, accessible format. No algorithms, no tracking, no noise.</p>
-            <p class="support-body" style="margin-bottom: 0;">I hope it benefits whoever finds it in the same way. If you have feedback, suggestions, or just want to say hello, feel free to <a href="#" style="color: var(--accent); text-decoration: none;" onclick="event.preventDefault(); document.getElementById('about-overlay').classList.remove('is-visible'); document.getElementById('contact-form').classList.add('is-visible');">contact me</a>.</p>
+            <p class="support-body">I hope it benefits whoever finds it in the same way. If you have feedback, suggestions, or just want to say hello, feel free to <a href="#" style="color: var(--accent); text-decoration: none;" onclick="event.preventDefault(); document.getElementById('about-overlay').classList.remove('is-visible'); document.getElementById('contact-form').classList.add('is-visible');">contact me</a>.</p>
+            <hr class="setup-divider">
+            <div class="setup-section">
+                <div class="setup-section-title">Open Source</div>
+                <p class="support-body" style="margin-bottom: 0;">This project is open source under the <a href="https://www.gnu.org/licenses/agpl-3.0.en.html" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none;">GNU Affero General Public License v3.0</a>. You're free to use, modify, and share the code — fork it and build a Daily Post for someone you care about. View the source on <a href="https://github.com/tvertner/Leonne.net" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none;">GitHub</a>.</p>
+            </div>
         </div>
     </div>
     <div id="support-overlay" class="setup-overlay" onclick="if(event.target===this) this.classList.remove('is-visible')">
