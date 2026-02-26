@@ -1,0 +1,39 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Generated content
+index.html
+articles.json
+ap_articles.json
+*.json
+!package.json
+
+# AP email tracking
+.ap_processed_ids
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Background images (if any — keep the repo lean)
+background*.png
