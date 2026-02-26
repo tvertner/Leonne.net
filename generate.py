@@ -105,6 +105,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         .topic-btn:hover { color: var(--text-primary); border-color: var(--border-light); background: var(--bg-hover); }
         .topic-btn.is-active { color: var(--accent); border-color: var(--accent-muted); background: rgba(196, 149, 106, 0.08); }
         .topic-btn:focus-visible { outline: 2px solid var(--accent-muted); outline-offset: 2px; border-radius: 4px; }
+        .support-btn { font-family: var(--font-body); font-size: 0.78rem; font-weight: 400; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.75rem; cursor: pointer; letter-spacing: 0.02em; white-space: nowrap; }
+        .support-btn:hover { color: var(--accent); border-color: var(--accent-muted); background: rgba(196, 149, 106, 0.08); }
+        .support-btn:focus-visible { outline: 2px solid var(--accent-muted); outline-offset: 2px; border-radius: 4px; }
         .date-group { margin-bottom: 2.5rem; }
         .date-label { font-family: var(--font-body); font-size: 0.78rem; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
         .entry { padding: 1rem 1.15rem; margin-bottom: 0.35rem; border-radius: 6px; cursor: pointer; }
@@ -190,9 +193,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <div class="support-link-row">
-        <a href="#" onclick="event.preventDefault(); document.getElementById('support-overlay').classList.add('is-visible')">Support this project ♡</a>
-    </div>
     <div class="container">
         <header>
             <div class="site-header-row">
@@ -200,6 +200,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div class="site-date">{{DATE}}</div>
             </div>
             <nav class="topic-nav" role="navigation" aria-label="Topic filters">
+                <button class="support-btn" onclick="event.preventDefault(); document.getElementById('support-overlay').classList.add('is-visible')">Support ♡</button>
                 <button class="topic-btn is-active" data-topic="all">All</button>
                 <button class="topic-btn" data-topic="local">Local</button>
                 <button class="topic-btn" data-topic="us">U.S.</button>
