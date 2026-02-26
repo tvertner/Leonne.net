@@ -9,6 +9,7 @@ articles.json
 ap_articles.json
 *.json
 !package.json
+!manifest.json
 
 # AP email tracking
 .ap_processed_ids
@@ -37,3 +38,6 @@ Thumbs.db
 
 # Background images (if any — keep the repo lean)
 background*.png
+
+# Source favicon files (originals in icons/)
+favicon_io/
