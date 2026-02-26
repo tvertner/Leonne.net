@@ -1,8 +1,8 @@
-# Daily Post
+# Leonne's Daily Post
 
 A calm, curated daily news digest — built for people who want to stay informed without the doomscroll, visual clutter, and distracting ads of mainstream news sites.
 
-Daily Post uses AI to scrape RSS feeds from dozens of trusted sources, select the most important stories, write brief commentaries, and assemble them into a clean, accessible single-page edition every morning. No algorithms, no tracking, no noise.
+Leonne's Daily Post uses AI to scrape RSS feeds from dozens of trusted sources, select the most important stories, write brief commentaries, and assemble them into a clean, accessible single-page edition every morning. No algorithms, no tracking, no noise. You cna view the latest edition at [https://leonne.net]
 
 ## How It Works
 
