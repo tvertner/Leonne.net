@@ -1649,7 +1649,7 @@ def generate_tts_audio(audio_articles: list, output_dir: str,
     # Generate intro
     now = datetime.now()
     date_label = now.strftime("%A, %B %-d, %Y")
-    intro_text = f"Leonne's Daily Post for {date_label}. Here are today's stories."
+    intro_text = f"Lee-own's Daily Post for {date_label}. Here are today's stories."
     intro_path = os.path.join(output_dir, "intro.mp3")
     if _tts_single(intro_text, intro_path, tts_url, ha_url, headers):
         print(f"    ✓ intro.mp3", file=sys.stderr)
