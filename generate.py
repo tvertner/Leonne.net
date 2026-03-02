@@ -202,7 +202,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         .source-filter-check:checked::after { content: '\2713'; position: absolute; top: -1px; left: 2px; font-size: 12px; color: var(--bg-primary); font-weight: 600; }
         .source-filter-check:focus-visible { outline: 2px solid var(--accent-muted); outline-offset: 2px; }
         .source-filter-row a { flex: 1; }
-        @media (max-width: 480px) { html { font-size: 16px; } .container { padding: 0 1.15rem; } header { padding: 2rem 0 1.5rem; } .entry { padding: 0.85rem 0.75rem; } }
+        @media (max-width: 480px) { html { font-size: 16px; } .container { padding: 0 1.15rem; } header { padding: 2rem 0 1.5rem; } .entry { padding: 0.85rem 0.75rem; } .site-header-row { flex-wrap: wrap; } .site-date { width: 100%; margin-top: 0.35rem; } }
         @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
         @media print { body { background: white; color: #222; } .entry-title { color: #222; } }
     </style>
@@ -798,7 +798,7 @@ AUDIO_HTML_TEMPLATE = r"""<!DOCTYPE html>
         .footer-link { font-family: var(--font-body); font-size: 0.78rem; font-weight: 400; color: var(--text-muted); background: none; border: none; cursor: pointer; padding: 0; letter-spacing: 0.02em; text-decoration: none; }
         .footer-link:hover { color: var(--accent); }
         .no-speech-notice { font-family: var(--font-body); font-size: 0.88rem; font-weight: 300; color: var(--text-secondary); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem 1.5rem; margin: 1.5rem 0; line-height: 1.65; }
-        @media (max-width: 480px) { html { font-size: 16px; } .container { padding: 0 1.15rem; } header { padding: 2rem 0 1.5rem; } .entry { padding: 0.85rem 0.75rem; } .player-btn { width: 36px; height: 36px; } .player-btn svg { width: 16px; height: 16px; } .player-article-title { font-size: 0.82rem; } }
+        @media (max-width: 480px) { html { font-size: 16px; } .container { padding: 0 1.15rem; } header { padding: 2rem 0 1.5rem; } .entry { padding: 0.85rem 0.75rem; } .site-header-row { flex-wrap: wrap; } .site-date { width: 100%; margin-top: 0.35rem; } .player-btn { width: 36px; height: 36px; } .player-btn svg { width: 16px; height: 16px; } .player-article-title { font-size: 0.82rem; } }
         @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
 </head>
