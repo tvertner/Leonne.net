@@ -1560,20 +1560,9 @@ def build_html(entries_html: str, archive_dir: str = None) -> str:
     return html
 
 
-# Sources excluded from audio edition (off by default in the reading UI)
-AUDIO_EXCLUDED_SOURCES = {
-    "ketv-omaha", "nebraska-examiner", "flatwater-free-press",
-    "american-libraries", "lisnews", "librarian-net", "library-technology-guides",
-}
-
-
 def build_audio_data(articles_list: list, selected_indices: list,
                      summary_map: dict) -> list:
-    """Extract structured article data for the audio edition.
-
-    Excludes sources that are off by default (local, library) to keep
-    the audio edition focused on the main news sources.
-    """
+    """Extract structured article data for the audio edition."""
     source_key_map = {
         "bbc-news": "bbc-news", "bbc-us": "bbc-news", "bbc-science": "bbc-news",
         "npr-world": "npr", "npr-us": "npr", "npr-politics": "npr",
@@ -1599,8 +1588,6 @@ def build_audio_data(articles_list: list, selected_indices: list,
         source = a.get("source", "")
         source_key = source.lower().replace(" ", "-").replace(".", "").replace("'", "")
         source_key = source_key_map.get(source_key, source_key)
-        if source_key in AUDIO_EXCLUDED_SOURCES:
-            continue
         title_slug = re.sub(r"[^\w\s-]", "", a.get("title", "").lower())
         title_slug = re.sub(r"\s+", "-", title_slug)[:50].rstrip("-")
         article_id = f"{source_key}-{title_slug}"
