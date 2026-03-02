@@ -10,17 +10,20 @@ The editorial pipeline runs in three stages:
 
 1. **Scrape** — `scraper.py` pulls articles from 30+ RSS feeds (wire services, public media, science, tech, environment, local news, long-form journalism). `parse_ap_emails.py` supplements this with AP News alerts parsed from email via IMAP.
 2. **Curate** — `generate.py` runs a two-model AI pipeline: Claude Haiku writes summaries for all candidates, then Claude Sonnet selects the best 35–50 stories based on editorial guidelines.
-3. **Publish** — The selected stories are assembled into a single HTML page and deployed to your web server. A Cloudflare cache purge ensures readers see the new edition immediately.
+3. **Narrate** — If Home Assistant Cloud is configured, `generate.py` calls the HA Cloud TTS API to generate individual MP3 files for each article using Google's neural voices. Files are saved to `/audio/YYYY-MM-DD/` and served statically.
+4. **Publish** — The selected stories and audio files are deployed to your web server. A Cloudflare cache purge ensures readers see the new edition immediately.
 
 A cron job runs this daily at 6 AM, or the reader can trigger it on-demand via an iOS Shortcut.
 
 ## What You Get
 
 - A single static HTML page with curated stories, grouped by date
+- **Audio edition** with pre-generated TTS via Home Assistant Cloud (falls back to browser Web Speech API)
 - Topic filtering (World, U.S., Science, Tech, Environment, Local, Libraries, Long Read)
 - Source filtering (toggle individual sources on/off)
 - Read tracking via localStorage (no server-side tracking)
 - Past editions archive
+- PWA support (installable on mobile, works offline)
 - Donation support via Stripe (optional)
 - Contact form with spam protection
 - Privacy-respecting design (no analytics, no cookies, no user accounts)
@@ -78,6 +81,7 @@ The key environment variables you'll need on the server:
 | `CONTACT_EMAIL` | Where contact form messages go |
 | `CLOUDFLARE_ZONE_ID` / `CLOUDFLARE_API_TOKEN` | Cache purging (optional) |
 | `STRIPE_PRICING_TABLE_ID` / `STRIPE_PUBLISHABLE_KEY` | Donations (optional) |
+| `HA_URL` / `HA_TOKEN` | Home Assistant Cloud TTS for audio edition (optional) |
 
 See `.env.example` for the full list.
 
@@ -90,9 +94,19 @@ This project was built for a specific person — a librarian in Omaha, Nebraska.
 3. **`generate.py`** — The editorial prompts in `SYSTEM_PROMPT`, `ENRICHMENT_PROMPT`, and `SELECTION_PROMPT` describe what kind of stories to prioritize. Adjust these to match your reader's interests.
 4. **HTML template** — The template inside `generate.py` contains the full page layout. Update the site name, sources list, about text, and footer to match your instance.
 
+## Audio Edition
+
+The `/listen` page provides an audio version of each day's edition. The player supports play/pause, skip forward/back, keyboard shortcuts, and auto-advances through all articles.
+
+**With Home Assistant Cloud TTS** (recommended): During the daily pipeline, each article is sent to the HA Cloud TTS API, which uses Google's neural voices to generate high-quality MP3 files. These are served as static files for instant, consistent playback on any device. This requires a [Home Assistant Cloud](https://www.nabucasa.com/) subscription and a long-lived access token.
+
+**Without HA Cloud**: The audio page falls back to the browser's built-in Web Speech API. Quality varies by device and browser, and some platforms (notably Android Chrome) have limited voice support.
+
+The audio edition excludes sources that are off by default in the reading UI (local news, library science) to keep the listen focused and concise.
+
 ## Cost
 
-Each daily generation costs approximately **$0.09** in Anthropic API usage (Haiku for summaries + Sonnet for selection). That's roughly **$2.70/month**.
+Each daily generation costs approximately **$0.09** in Anthropic API usage (Haiku for summaries + Sonnet for selection). That's roughly **$2.70/month**. Home Assistant Cloud TTS is included in the Nabucasa subscription ($6.50/month) with no per-request charges.
 
 ## Project Structure
 
@@ -103,7 +117,7 @@ Each daily generation costs approximately **$0.09** in Anthropic API usage (Haik
 ├── merge_articles.py      # Merges article sources
 ├── generate.py            # AI editorial pipeline + HTML assembly
 ├── deploy_server.py       # Flask server for deploy/generate/contact
-├── run_pipeline.sh        # Full pipeline orchestrator
+├── run_pipeline.sh        # Full pipeline orchestrator (incl. TTS + audio deploy)
 ├── cron_generate.sh       # Cron wrapper
 ├── SHORTCUT_INSTRUCTIONS.md # iOS Shortcut setup guide
 ├── .env.example           # Environment variable template

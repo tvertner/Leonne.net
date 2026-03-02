@@ -19,8 +19,11 @@ import html as html_lib
 import json
 import os
 import re
+import shutil
 import sys
+import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 try:
     import anthropic
@@ -107,6 +110,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         .site-header-row { display: flex; justify-content: space-between; align-items: baseline; }
         .site-name { font-family: var(--font-serif); font-size: 1.62rem; font-weight: 400; color: var(--text-primary); letter-spacing: 0.04em; display: flex; align-items: center; gap: 0.5rem; }
         .site-logo { width: 1.5em; height: 1.5em; flex-shrink: 0; stroke: var(--accent); }
+        .listen-link { display: inline-flex; align-items: center; margin-left: 0.25rem; color: var(--text-muted); text-decoration: none; }
+        .listen-link:hover { color: var(--accent); }
+        .listen-link:focus-visible { outline: 2px solid var(--accent-muted); outline-offset: 3px; border-radius: 2px; }
+        .listen-icon { width: 1.1em; height: 1.1em; stroke: currentColor; }
         .site-date { font-family: var(--font-body); font-size: 0.8rem; font-weight: 300; color: var(--text-muted); letter-spacing: 0.02em; }
         .topic-nav { display: flex; flex-wrap: wrap; gap: 0.25rem; padding: 1.25rem 0; }
         .topic-btn { font-family: var(--font-body); font-size: 0.78rem; font-weight: 400; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.75rem; cursor: pointer; letter-spacing: 0.02em; white-space: nowrap; }
@@ -204,7 +211,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="container">
         <header>
             <div class="site-header-row">
-                <div class="site-name"><svg class="site-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="12" x2="12" y2="12"/><line x1="7" y1="16" x2="14" y2="16"/><rect x="14" y="11" width="3" height="5" rx="0.5"/></svg>Leonne's Daily Post</div>
+                <div class="site-name"><svg class="site-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="12" x2="12" y2="12"/><line x1="7" y1="16" x2="14" y2="16"/><rect x="14" y="11" width="3" height="5" rx="0.5"/></svg>Leonne's Daily Post<a href="/listen" class="listen-link" title="Listen to today's edition read aloud" aria-label="Listen to audio edition"><svg class="listen-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></a></div>
                 <div class="site-date">{{DATE}}</div>
             </div>
             <nav class="topic-nav" role="navigation" aria-label="Topic filters">
@@ -701,6 +708,413 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 
 # ---------------------------------------------------------------------------
+# AUDIO EDITION TEMPLATE
+# ---------------------------------------------------------------------------
+# Placeholders:
+#   {{DATE}}          — Today's date string
+#   {{ARTICLE_JSON}}  — JSON array of article objects for the player
+# ---------------------------------------------------------------------------
+
+AUDIO_HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leonne's Daily Post — Listen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,300;0,7..72,400;0,7..72,500;1,7..72,300;1,7..72,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1a1a1f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
+    <style>
+        :root {
+            --bg-primary: #1a1a1f;
+            --bg-surface: #222228;
+            --bg-hover: #2a2a31;
+            --text-primary: #d4d1cc;
+            --text-secondary: #9a9790;
+            --text-muted: #6b6862;
+            --accent: #c4956a;
+            --accent-muted: #a07a55;
+            --border: #2e2e35;
+            --border-light: #38383f;
+            --font-body: 'DM Sans', sans-serif;
+            --font-serif: 'Literata', Georgia, serif;
+            --line-height: 1.7;
+            --letter-spacing: 0.015em;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { font-size: 17px; scroll-behavior: smooth; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+        body { background-color: var(--bg-primary); color: var(--text-primary); font-family: var(--font-body); line-height: var(--line-height); letter-spacing: var(--letter-spacing); min-height: 100vh; }
+        .container { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+        header { padding: 3rem 0 2rem; border-bottom: 1px solid var(--border); margin-bottom: 0; }
+        .site-header-row { display: flex; justify-content: space-between; align-items: baseline; }
+        .site-name { font-family: var(--font-serif); font-size: 1.62rem; font-weight: 400; color: var(--text-primary); letter-spacing: 0.04em; display: flex; align-items: center; gap: 0.5rem; text-decoration: none; }
+        .site-name:hover { color: var(--accent); }
+        .site-logo { width: 1.5em; height: 1.5em; flex-shrink: 0; stroke: var(--accent); }
+        .site-date { font-family: var(--font-body); font-size: 0.8rem; font-weight: 300; color: var(--text-muted); letter-spacing: 0.02em; display: flex; align-items: center; gap: 0.75rem; }
+        .listen-badge { font-size: 0.72rem; font-weight: 400; color: var(--accent-muted); background: rgba(196, 149, 106, 0.1); border: 1px solid rgba(196, 149, 106, 0.2); border-radius: 4px; padding: 0.2rem 0.5rem; letter-spacing: 0.04em; text-transform: uppercase; }
+        .audio-player { position: sticky; top: 0; z-index: 50; background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 1rem 0; }
+        .player-inner { display: flex; align-items: center; gap: 0.75rem; padding: 0 1.5rem; }
+        .player-btn { flex-shrink: 0; width: 40px; height: 40px; background: transparent; border: 1.5px solid var(--border-light); border-radius: 50%; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: border-color 0.15s, color 0.15s; }
+        .player-btn:hover { border-color: var(--accent-muted); color: var(--accent); }
+        .player-btn:focus-visible { outline: 2px solid var(--accent-muted); outline-offset: 2px; }
+        .player-btn svg { width: 18px; height: 18px; fill: currentColor; }
+        .player-btn.is-active { border-color: var(--accent); color: var(--accent); }
+        .player-info { flex: 1; min-width: 0; }
+        .player-now-reading { font-family: var(--font-body); font-size: 0.78rem; font-weight: 400; color: var(--text-muted); letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .player-article-title { font-family: var(--font-serif); font-size: 0.88rem; font-weight: 400; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.15rem; }
+        .player-progress { flex-shrink: 0; font-family: var(--font-body); font-size: 0.75rem; font-weight: 300; color: var(--text-muted); letter-spacing: 0.02em; white-space: nowrap; }
+        .player-progress-bar { width: auto; height: 2px; background: var(--border); margin: 0.75rem 1.5rem 0; border-radius: 1px; overflow: hidden; }
+        .player-progress-fill { height: 100%; background: var(--accent-muted); width: 0%; transition: width 0.3s ease; border-radius: 1px; }
+        .date-group { margin-bottom: 2.5rem; margin-top: 1.5rem; }
+        .date-label { font-family: var(--font-body); font-size: 0.78rem; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+        .entry { padding: 1rem 1.15rem; margin-bottom: 0.35rem; border-radius: 6px; cursor: pointer; transition: background-color 0.15s, border-color 0.15s; border: 1.5px solid transparent; }
+        .entry:hover { background-color: var(--bg-hover); }
+        .entry.is-playing { background-color: rgba(196, 149, 106, 0.06); border-color: rgba(196, 149, 106, 0.2); }
+        .entry.is-read { opacity: 0.55; }
+        .entry.is-read:hover { opacity: 0.75; }
+        .entry.is-read.is-playing { opacity: 0.85; }
+        .entry-top-row { display: flex; align-items: flex-start; gap: 0.75rem; }
+        .entry-index { flex-shrink: 0; width: 22px; height: 22px; margin-top: 0.3rem; font-family: var(--font-body); font-size: 0.68rem; font-weight: 400; color: var(--text-muted); display: flex; align-items: center; justify-content: center; }
+        .entry.is-playing .entry-index { color: var(--accent); }
+        .entry-content { flex: 1; min-width: 0; }
+        .entry-tag { font-family: var(--font-body); font-size: 0.68rem; font-weight: 500; color: var(--accent-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.3rem; }
+        .entry-title { font-family: var(--font-serif); font-size: 1.05rem; font-weight: 400; color: var(--text-primary); line-height: 1.5; }
+        .entry-commentary { font-family: var(--font-body); font-size: 0.9rem; font-weight: 300; color: var(--text-secondary); margin-top: 0.5rem; line-height: 1.65; }
+        .read-more { display: inline-block; font-family: var(--font-body); font-size: 0.82rem; font-weight: 400; color: var(--accent); text-decoration: none; letter-spacing: 0.03em; padding: 0.3rem 0; margin-top: 0.35rem; }
+        .read-more:hover { color: var(--text-primary); }
+        .read-more:focus-visible { outline: 2px solid var(--accent-muted); outline-offset: 3px; border-radius: 2px; }
+        .read-more span { margin-left: 0.3rem; }
+        footer { margin-top: 3rem; padding: 2rem 0; border-top: 1px solid var(--border); }
+        .footer-text { font-size: 0.78rem; color: var(--text-muted); font-weight: 300; }
+        .footer-links { margin-top: 0.75rem; display: flex; gap: 1.25rem; flex-wrap: wrap; }
+        .footer-link { font-family: var(--font-body); font-size: 0.78rem; font-weight: 400; color: var(--text-muted); background: none; border: none; cursor: pointer; padding: 0; letter-spacing: 0.02em; text-decoration: none; }
+        .footer-link:hover { color: var(--accent); }
+        .no-speech-notice { font-family: var(--font-body); font-size: 0.88rem; font-weight: 300; color: var(--text-secondary); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem 1.5rem; margin: 1.5rem 0; line-height: 1.65; }
+        @media (max-width: 480px) { html { font-size: 16px; } .container { padding: 0 1.15rem; } header { padding: 2rem 0 1.5rem; } .entry { padding: 0.85rem 0.75rem; } .player-btn { width: 36px; height: 36px; } .player-btn svg { width: 16px; height: 16px; } .player-article-title { font-size: 0.82rem; } }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="site-header-row">
+                <a href="/" class="site-name" title="Back to Leonne's Daily Post">
+                    <svg class="site-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="12" x2="12" y2="12"/><line x1="7" y1="16" x2="14" y2="16"/><rect x="14" y="11" width="3" height="5" rx="0.5"/></svg>
+                    Leonne's Daily Post
+                </a>
+                <div class="site-date">
+                    <span class="listen-badge">Audio Edition</span>
+                    {{DATE}}
+                </div>
+            </div>
+        </header>
+        <div class="audio-player" id="audio-player">
+            <div class="player-inner">
+                <button class="player-btn" id="btn-prev" aria-label="Previous article" title="Previous article">
+                    <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+                </button>
+                <button class="player-btn" id="btn-play" aria-label="Play audio edition" title="Play audio edition">
+                    <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    <svg id="icon-pause" viewBox="0 0 24 24" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                </button>
+                <button class="player-btn" id="btn-next" aria-label="Next article" title="Skip to next article">
+                    <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                </button>
+                <div class="player-info">
+                    <div class="player-now-reading" id="player-status">Press play to start</div>
+                    <div class="player-article-title" id="player-title">&nbsp;</div>
+                </div>
+                <div class="player-progress" id="player-counter">&nbsp;</div>
+            </div>
+            <div class="player-progress-bar">
+                <div class="player-progress-fill" id="player-progress-fill"></div>
+            </div>
+        </div>
+        <main id="articles-container"></main>
+        <footer>
+            <p class="footer-text">Curated with love for Leonne</p>
+            <div class="footer-links">
+                <a href="/" class="footer-link">Read edition ↗</a>
+            </div>
+        </footer>
+    </div>
+    <script id="article-data" type="application/json">
+{{ARTICLE_JSON}}
+    </script>
+    <script>
+    (function() {
+        'use strict';
+        var articles = JSON.parse(document.getElementById('article-data').textContent);
+        var AUDIO_BASE = '{{AUDIO_BASE_URL}}';
+        var hasAudioFiles = articles.some(function(a) { return !!a.audio_url; });
+        var btnPlay = document.getElementById('btn-play');
+        var btnPrev = document.getElementById('btn-prev');
+        var btnNext = document.getElementById('btn-next');
+        var iconPlay = document.getElementById('icon-play');
+        var iconPause = document.getElementById('icon-pause');
+        var playerStatus = document.getElementById('player-status');
+        var playerTitle = document.getElementById('player-title');
+        var playerCounter = document.getElementById('player-counter');
+        var progressFill = document.getElementById('player-progress-fill');
+        var container = document.getElementById('articles-container');
+
+        // Build article list in DOM
+        var group = document.createElement('section');
+        group.className = 'date-group';
+        articles.forEach(function(a, i) {
+            var article = document.createElement('article');
+            article.className = 'entry';
+            article.dataset.index = i;
+            article.dataset.articleId = a.id;
+            article.innerHTML = '<div class="entry-top-row"><div class="entry-index">' + (i + 1) + '</div><div class="entry-content"><div class="entry-tag">' + escapeHtml(a.category_label) + '</div><div class="entry-header"><span class="entry-title">' + escapeHtml(a.title) + '</span></div><p class="entry-commentary">' + escapeHtml(a.commentary) + '</p><a href="' + escapeHtml(a.url) + '" class="read-more" target="_blank" rel="noopener">Continue reading at ' + escapeHtml(a.source) + ' <span>\u2192</span></a></div></div>';
+            article.addEventListener('click', function(e) {
+                if (e.target.closest('.read-more')) e.preventDefault();
+                handleArticleClick(i, a.url);
+            });
+            group.appendChild(article);
+        });
+        container.appendChild(group);
+
+        // ---------------------------------------------------------------
+        // AUDIO PLAYER — uses <audio> with pre-generated MP3s,
+        // falls back to Web Speech API if no audio files available
+        // ---------------------------------------------------------------
+        var audio = new Audio();
+        var useSpeech = !hasAudioFiles && ('speechSynthesis' in window);
+        var state = 'idle';
+        var currentIndex = -1;
+        var pausedAtNext = 0;
+        var gapTimer = null;
+
+        if (!hasAudioFiles && !useSpeech) {
+            var notice = document.createElement('div');
+            notice.className = 'no-speech-notice';
+            notice.textContent = "Audio files are not available and your browser doesn't support text-to-speech.";
+            container.parentNode.insertBefore(notice, container);
+        }
+
+        // --- Playback engine ---
+        function playSound(src, onEnd) {
+            audio.pause();
+            audio.src = src;
+            audio.onended = function() { if (onEnd) onEnd(); };
+            audio.onerror = function() { if (onEnd) onEnd(); };
+            audio.play().catch(function() { if (onEnd) onEnd(); });
+        }
+
+        function speakFallback(text, onEnd) {
+            window.speechSynthesis.cancel();
+            var utter = new SpeechSynthesisUtterance(text);
+            utter.rate = 1.0;
+            utter.onend = function() { if (onEnd) onEnd(); };
+            utter.onerror = function(e) { if (e.error !== 'canceled' && onEnd) onEnd(); };
+            window.speechSynthesis.speak(utter);
+        }
+
+        function stopPlayback() {
+            audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
+            if (useSpeech) window.speechSynthesis.cancel();
+            if (gapTimer) { clearTimeout(gapTimer); gapTimer = null; }
+        }
+
+        // --- Preload next article for gapless playback ---
+        function preloadNext(index) {
+            if (index < articles.length && articles[index].audio_url) {
+                var link = document.createElement('link');
+                link.rel = 'prefetch';
+                link.href = articles[index].audio_url;
+                link.as = 'audio';
+                document.head.appendChild(link);
+            }
+        }
+
+        // --- UI update ---
+        function updateUI() {
+            var isPlaying = (state === 'intro' || state === 'speaking' || state === 'gap');
+            iconPlay.style.display = isPlaying ? 'none' : '';
+            iconPause.style.display = isPlaying ? '' : 'none';
+            btnPlay.classList.toggle('is-active', isPlaying);
+            btnPlay.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+            btnPlay.setAttribute('title', isPlaying ? 'Pause' : 'Play');
+            if (state === 'idle') {
+                playerStatus.textContent = 'Press play to start';
+                playerTitle.innerHTML = '\u00a0';
+                playerCounter.innerHTML = '\u00a0';
+                progressFill.style.width = '0%';
+            } else if (state === 'intro') {
+                playerStatus.textContent = 'Introduction';
+                playerTitle.innerHTML = '\u00a0';
+                playerCounter.textContent = '0 / ' + articles.length;
+                progressFill.style.width = '0%';
+            } else if (state === 'speaking' || state === 'gap') {
+                var a = articles[currentIndex];
+                playerStatus.textContent = a.category_label + ' \u00b7 Article ' + (currentIndex + 1) + ' of ' + articles.length;
+                playerTitle.textContent = a.title;
+                playerCounter.textContent = (currentIndex + 1) + ' / ' + articles.length;
+                progressFill.style.width = (((currentIndex + 1) / articles.length) * 100) + '%';
+            } else if (state === 'paused') {
+                playerStatus.textContent = 'Paused';
+                if (currentIndex >= 0 && currentIndex < articles.length) {
+                    playerCounter.textContent = (currentIndex + 1) + ' / ' + articles.length;
+                }
+            } else if (state === 'finished') {
+                playerStatus.textContent = 'Finished';
+                playerTitle.innerHTML = '\u00a0';
+                playerCounter.textContent = articles.length + ' / ' + articles.length;
+                progressFill.style.width = '100%';
+            }
+            document.querySelectorAll('.entry').forEach(function(el) {
+                el.classList.toggle('is-playing', parseInt(el.dataset.index) === currentIndex && isPlaying);
+            });
+        }
+
+        function scrollToArticle(index) {
+            var entry = document.querySelector('.entry[data-index="' + index + '"]');
+            if (entry) entry.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        // --- Playback flow ---
+        function playIntro() {
+            state = 'intro';
+            updateUI();
+            var afterIntro = function() {
+                if (state !== 'intro') return;
+                startGap(0);
+            };
+            if (hasAudioFiles) {
+                playSound(AUDIO_BASE + '/intro.mp3', afterIntro);
+            } else if (useSpeech) {
+                var dateEl = document.querySelector('.site-date');
+                var label = dateEl ? dateEl.textContent.replace('Audio Edition', '').trim() : '';
+                speakFallback("Leonne's Daily Post for " + label + ". Here are today's stories.", afterIntro);
+            }
+            preloadNext(0);
+        }
+
+        function playArticle(index) {
+            if (index >= articles.length) {
+                state = 'finished';
+                currentIndex = articles.length - 1;
+                updateUI();
+                return;
+            }
+            currentIndex = index;
+            state = 'speaking';
+            updateUI();
+            scrollToArticle(index);
+            var a = articles[index];
+            var onDone = function() {
+                if (state !== 'speaking') return;
+                if (index + 1 < articles.length) { startGap(index + 1); }
+                else { state = 'finished'; updateUI(); }
+            };
+            if (a.audio_url) {
+                playSound(a.audio_url, onDone);
+            } else if (useSpeech) {
+                speakFallback(a.category_label + '. ' + a.title + '. ' + a.commentary, onDone);
+            }
+            preloadNext(index + 1);
+        }
+
+        function startGap(nextIndex) {
+            state = 'gap';
+            currentIndex = nextIndex;
+            updateUI();
+            scrollToArticle(nextIndex);
+            gapTimer = setTimeout(function() {
+                gapTimer = null;
+                if (state !== 'gap') return;
+                playArticle(nextIndex);
+            }, 2000);
+        }
+
+        // --- Button handlers ---
+        btnPlay.addEventListener('click', function() {
+            if (state === 'idle') { playIntro(); }
+            else if (state === 'intro' || state === 'speaking' || state === 'gap') {
+                stopPlayback();
+                if (state === 'intro') pausedAtNext = 0;
+                else if (state === 'gap') pausedAtNext = currentIndex;
+                else pausedAtNext = currentIndex + 1;
+                state = 'paused';
+                updateUI();
+            } else if (state === 'paused') { playArticle(pausedAtNext); }
+            else if (state === 'finished') { currentIndex = -1; playIntro(); }
+        });
+        btnNext.addEventListener('click', function() {
+            if (state === 'speaking' || state === 'gap') { stopPlayback(); playArticle(currentIndex + 1); }
+            else if (state === 'paused') { playArticle(Math.min(pausedAtNext, articles.length - 1)); }
+            else if (state === 'intro') { stopPlayback(); playArticle(0); }
+        });
+        btnPrev.addEventListener('click', function() {
+            if (state === 'speaking' || state === 'gap') { stopPlayback(); playArticle(Math.max(0, currentIndex - 1)); }
+            else if (state === 'paused') { pausedAtNext = Math.max(0, pausedAtNext - 1); playArticle(pausedAtNext); }
+        });
+
+        // --- Article click ---
+        function handleArticleClick(index, url) {
+            if (state === 'speaking' || state === 'gap' || state === 'intro') {
+                stopPlayback();
+                pausedAtNext = index + 1;
+                currentIndex = index;
+                state = 'paused';
+                updateUI();
+            }
+            markRead(articles[index].id);
+            if (url && url !== '#') { window.open(url, '_blank'); window.focus(); }
+        }
+
+        // --- Read tracking (shared with main site) ---
+        var STORAGE_KEY = 'leonne-read-articles';
+        function getReadArticles() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch(e) { return {}; } }
+        function markRead(articleId) {
+            var read = getReadArticles();
+            read[articleId] = Date.now();
+            var cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
+            for (var key in read) { if (read[key] < cutoff) delete read[key]; }
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(read));
+        }
+        var readArticles = getReadArticles();
+        document.querySelectorAll('.entry').forEach(function(entry) {
+            if (readArticles[entry.dataset.articleId]) entry.classList.add('is-read');
+        });
+
+        // --- Keyboard shortcuts ---
+        document.addEventListener('keydown', function(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.key === ' ' || e.key === 'k') { e.preventDefault(); btnPlay.click(); }
+            else if (e.key === 'ArrowRight' || e.key === 'n') { e.preventDefault(); btnNext.click(); }
+            else if (e.key === 'ArrowLeft' || e.key === 'p') { e.preventDefault(); btnPrev.click(); }
+        });
+
+        // --- iOS Safari workaround (only needed for speech fallback) ---
+        if (useSpeech && /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+            setInterval(function() {
+                if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+                    window.speechSynthesis.pause();
+                    window.speechSynthesis.resume();
+                }
+            }, 10000);
+        }
+
+        function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+    })();
+    </script>
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
 # EDITORIAL PROMPT
 # ---------------------------------------------------------------------------
 
@@ -1048,8 +1462,14 @@ def generate_entries(articles_json: str, api_key: str) -> str:
         html_parts.append(f'        </section>')
 
     result = "\n".join(html_parts)
-    print(f"  Assembled {sum(len(e) for e in date_groups.values())} entries", file=sys.stderr)
-    return result
+    entry_count = sum(len(e) for e in date_groups.values())
+    print(f"  Assembled {entry_count} entries", file=sys.stderr)
+    return {
+        "html": result,
+        "articles_list": articles_list,
+        "selected_indices": selected_indices,
+        "summary_map": summary_map,
+    }
 
 
 def generate_entries_fallback(articles_json: str, api_key: str) -> str:
@@ -1140,11 +1560,182 @@ def build_html(entries_html: str, archive_dir: str = None) -> str:
     return html
 
 
-def deploy(html: str, deploy_url: str, deploy_token: str) -> bool:
+# Sources excluded from audio edition (off by default in the reading UI)
+AUDIO_EXCLUDED_SOURCES = {
+    "ketv-omaha", "nebraska-examiner", "flatwater-free-press",
+    "american-libraries", "lisnews", "librarian-net", "library-technology-guides",
+}
+
+
+def build_audio_data(articles_list: list, selected_indices: list,
+                     summary_map: dict) -> list:
+    """Extract structured article data for the audio edition.
+
+    Excludes sources that are off by default (local, library) to keep
+    the audio edition focused on the main news sources.
+    """
+    source_key_map = {
+        "bbc-news": "bbc-news", "bbc-us": "bbc-news", "bbc-science": "bbc-news",
+        "npr-world": "npr", "npr-us": "npr", "npr-politics": "npr",
+        "npr-science": "npr", "npr-technology": "npr",
+        "associated-press": "ap",
+        "ars-technica": "ars-technica", "the-verge": "the-verge",
+        "the-atlantic": "the-atlantic", "the-new-yorker": "the-new-yorker",
+        "the-hill": "the-hill", "pbs-newshour": "pbs-newshour",
+        "al-jazeera": "al-jazeera", "inside-climate-news": "inside-climate-news",
+        "yale-e360": "yale-e360", "ketv-omaha": "ketv-omaha",
+        "nebraska-examiner": "nebraska-examiner",
+        "flatwater-free-press": "flatwater-free-press",
+        "american-libraries": "american-libraries",
+        "library-technology-guides": "library-technology-guides",
+        "foreign-affairs": "foreign-affairs", "foreign-policy": "foreign-policy",
+    }
+    audio_articles = []
+    for idx in selected_indices:
+        if idx < 0 or idx >= len(articles_list):
+            continue
+        a = articles_list[idx]
+        summary = summary_map.get(idx, "")
+        source = a.get("source", "")
+        source_key = source.lower().replace(" ", "-").replace(".", "").replace("'", "")
+        source_key = source_key_map.get(source_key, source_key)
+        if source_key in AUDIO_EXCLUDED_SOURCES:
+            continue
+        title_slug = re.sub(r"[^\w\s-]", "", a.get("title", "").lower())
+        title_slug = re.sub(r"\s+", "-", title_slug)[:50].rstrip("-")
+        article_id = f"{source_key}-{title_slug}"
+        audio_articles.append({
+            "id": article_id,
+            "title": a.get("title", ""),
+            "category_label": a.get("category_label", ""),
+            "commentary": summary,
+            "source": source,
+            "url": a.get("link", "#"),
+            "topic": a.get("category", "us"),
+        })
+    return audio_articles
+
+
+def build_audio_html(audio_articles: list, audio_base_url: str = "") -> str:
+    """Build the audio edition HTML page."""
+    now = datetime.now()
+    date_str = now.strftime("%A, %B %-d, %Y")
+    # Add audio URLs to article data
+    for a in audio_articles:
+        if a.get("audio_file"):
+            a["audio_url"] = f"{audio_base_url}/{a['audio_file']}"
+        else:
+            a["audio_url"] = None
+    articles_json = json.dumps(audio_articles, ensure_ascii=False, indent=2)
+    html = AUDIO_HTML_TEMPLATE.replace("{{DATE}}", date_str)
+    html = html.replace("{{ARTICLE_JSON}}", articles_json)
+    html = html.replace("{{AUDIO_BASE_URL}}", audio_base_url)
+    return html
+
+
+# ---------------------------------------------------------------------------
+# TTS AUDIO GENERATION (via Home Assistant Cloud)
+# ---------------------------------------------------------------------------
+
+def generate_tts_audio(audio_articles: list, output_dir: str,
+                       ha_url: str, ha_token: str) -> bool:
+    """Generate MP3 files for each article using Home Assistant Cloud TTS.
+
+    Args:
+        audio_articles: List of article dicts from build_audio_data()
+        output_dir: Directory to save MP3 files (e.g., /opt/leonne-deploy/audio/2026-03-01)
+        ha_url: Home Assistant URL (e.g., http://192.168.1.100:8123)
+        ha_token: Home Assistant long-lived access token
+
+    Returns:
+        True if all files were generated successfully.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    headers = {
+        "Authorization": f"Bearer {ha_token}",
+        "Content-Type": "application/json",
+    }
+    tts_url = f"{ha_url.rstrip('/')}/api/tts_get_url"
+    success_count = 0
+    fail_count = 0
+
+    # Generate intro
+    now = datetime.now()
+    date_label = now.strftime("%A, %B %-d, %Y")
+    intro_text = f"Leonne's Daily Post for {date_label}. Here are today's stories."
+    intro_path = os.path.join(output_dir, "intro.mp3")
+    if _tts_single(intro_text, intro_path, tts_url, ha_url, headers):
+        print(f"    ✓ intro.mp3", file=sys.stderr)
+    else:
+        print(f"    ✗ intro.mp3 failed", file=sys.stderr)
+        fail_count += 1
+
+    # Generate one MP3 per article
+    for i, article in enumerate(audio_articles):
+        filename = f"{i:02d}.mp3"
+        filepath = os.path.join(output_dir, filename)
+        # Compose the spoken text: category, title, then commentary
+        spoken = f"{article['category_label']}. {article['title']}. {article['commentary']}"
+        if _tts_single(spoken, filepath, tts_url, ha_url, headers):
+            article["audio_file"] = filename
+            success_count += 1
+            if (i + 1) % 10 == 0 or i == len(audio_articles) - 1:
+                print(f"    ✓ {success_count}/{len(audio_articles)} articles", file=sys.stderr)
+        else:
+            article["audio_file"] = None
+            fail_count += 1
+            print(f"    ✗ {filename} failed ({article['title'][:40]}...)", file=sys.stderr)
+
+        # Small delay to avoid hammering HA
+        time.sleep(0.3)
+
+    print(f"  TTS complete: {success_count} succeeded, {fail_count} failed", file=sys.stderr)
+    return fail_count == 0
+
+
+def _tts_single(text: str, output_path: str,
+                tts_url: str, ha_url: str, headers: dict) -> bool:
+    """Generate a single TTS MP3 via Home Assistant Cloud."""
+    try:
+        # Step 1: Get audio URL from HA
+        resp = requests.post(tts_url, headers=headers, json={
+            "engine_id": "tts.home_assistant_cloud",
+            "message": text,
+            "language": "en-US",
+        }, timeout=30)
+        if resp.status_code != 200:
+            print(f"      TTS URL request failed: {resp.status_code}", file=sys.stderr)
+            return False
+
+        audio_path = resp.json().get("path", "")
+        if not audio_path:
+            print(f"      No audio path in response", file=sys.stderr)
+            return False
+
+        # Step 2: Download the audio file
+        audio_url = f"{ha_url.rstrip('/')}{audio_path}"
+        dl_resp = requests.get(audio_url, headers={
+            "Authorization": headers["Authorization"],
+        }, timeout=60)
+        if dl_resp.status_code != 200:
+            print(f"      Audio download failed: {dl_resp.status_code}", file=sys.stderr)
+            return False
+
+        with open(output_path, "wb") as f:
+            f.write(dl_resp.content)
+        return True
+
+    except Exception as e:
+        print(f"      TTS error: {e}", file=sys.stderr)
+        return False
+
+
+def deploy(html: str, deploy_url: str, deploy_token: str, filename: str = "index.html") -> bool:
     """POST the generated HTML to the deploy endpoint."""
     try:
+        url = f"{deploy_url}?filename={filename}" if filename != "index.html" else deploy_url
         response = requests.post(
-            deploy_url,
+            url,
             data=html.encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {deploy_token}",
@@ -1214,7 +1805,20 @@ def main():
 
     # Generate editorial entries
     print("Generating editorial content...", file=sys.stderr)
-    entries_html = generate_entries(articles_data, api_key)
+    result = generate_entries(articles_data, api_key)
+
+    # Handle both dict (normal pipeline) and str (fallback) returns
+    if isinstance(result, dict):
+        entries_html = result["html"]
+        audio_articles = build_audio_data(
+            result["articles_list"],
+            result["selected_indices"],
+            result["summary_map"],
+        )
+    else:
+        entries_html = result
+        audio_articles = []
+
     print(f"  Generated {len(entries_html)} chars of HTML", file=sys.stderr)
 
     # Build final HTML
@@ -1222,11 +1826,39 @@ def main():
     final_html = build_html(entries_html, args.archive_dir)
     print(f"  Final page: {len(final_html)} chars", file=sys.stderr)
 
+    # Build audio edition
+    audio_html = None
+    audio_dir = None
+    if audio_articles:
+        # TTS generation (if HA credentials available)
+        ha_url = os.environ.get("HA_URL", "")
+        ha_token = os.environ.get("HA_TOKEN", "")
+        date_slug = datetime.now().strftime("%Y-%m-%d")
+        audio_base_url = f"/audio/{date_slug}"
+
+        if ha_url and ha_token:
+            workdir = os.path.dirname(args.output) or "." if args.output else "."
+            audio_dir = os.path.join(workdir, "audio", date_slug)
+            print(f"Generating TTS audio ({len(audio_articles)} articles)...", file=sys.stderr)
+            generate_tts_audio(audio_articles, audio_dir, ha_url, ha_token)
+        else:
+            print("  HA_URL/HA_TOKEN not set, skipping TTS generation (Web Speech fallback)", file=sys.stderr)
+
+        print("Assembling audio edition...", file=sys.stderr)
+        audio_html = build_audio_html(audio_articles, audio_base_url)
+        print(f"  Audio page: {len(audio_html)} chars ({len(audio_articles)} articles)", file=sys.stderr)
+
     # Save locally
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(final_html)
         print(f"  Saved to {args.output}", file=sys.stderr)
+
+        if audio_html:
+            audio_output = os.path.join(os.path.dirname(args.output) or ".", "listen.html")
+            with open(audio_output, "w", encoding="utf-8") as f:
+                f.write(audio_html)
+            print(f"  Saved audio edition to {audio_output}", file=sys.stderr)
     else:
         print(final_html)
 
@@ -1238,6 +1870,9 @@ def main():
             sys.exit(1)
         print("Deploying...", file=sys.stderr)
         deploy(final_html, args.deploy, deploy_token)
+        if audio_html:
+            print("Deploying audio edition...", file=sys.stderr)
+            deploy(audio_html, args.deploy, deploy_token, filename="listen.html")
 
     print("Done!", file=sys.stderr)
 
