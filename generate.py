@@ -48,9 +48,9 @@ except ImportError:
     # Fallback defaults if config.py is not present
     STRIPE_PRICING_TABLE_ID = os.environ.get("STRIPE_PRICING_TABLE_ID", "")
     STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
-    ENRICHMENT_MODEL = "claude-haiku-4-5-20251001"
-    SELECTION_MODEL = "claude-sonnet-4-5-20250929"
-    FALLBACK_MODEL = "claude-haiku-4-5-20251001"
+    ENRICHMENT_MODEL = "claude-haiku-5-5"
+    SELECTION_MODEL = "claude-sonnet-5-5"
+    FALLBACK_MODEL = "claude-haiku-5-5"
     SITE_NAME = "Leonne's Daily Post"
     SITE_TAGLINE = "Curated with love for Leonne"
     READER_NAME = "Leonne"
@@ -1021,7 +1021,8 @@ AUDIO_HTML_TEMPLATE = r"""<!DOCTYPE html>
             if (a.audio_url) {
                 playSound(a.audio_url, onDone);
             } else if (useSpeech) {
-                speakFallback(a.category_label + '. ' + a.title + '. ' + a.commentary, onDone);
+                var src = a.spoken_source || a.source, ttl = a.spoken_title || a.title;
+                speakFallback((src ? 'From ' + src + ', ' : '') + (/[.?!]$/.test(ttl) ? ttl : ttl + '.') + ' ' + (a.spoken_summary || a.commentary), onDone);
             }
             preloadNext(index + 1);
         }
@@ -1131,6 +1132,8 @@ EDITORIAL GUIDELINES:
 - Include long-form pieces from The New Yorker, The Atlantic, Bellingcat, or Lawfare when they're substantive
 - Leonne is LEAST interested in celebrity news, sports, and culture/entertainment
 - Skip stories that are just brief news alerts without substance
+- Only use local sources (like KETV-Omaha, Nebraska-Examiner, and Flatwater Free Press) when they're discussing news peculiar to Nebraska 
+- Do not use local sources to cover U.S. and world events unless absolutely no other source is covering it
 
 FOR EACH SELECTED STORY, produce:
 1. A category tag (use the category_label from the article data)
@@ -1195,12 +1198,25 @@ For each article, write a summary that:
 - Captures the core news or insight in 1–2 sentences
 - Is written in a thoughtful, curious, understated tone — like a smart friend pointing out something worth reading
 - Highlights why this story matters or what makes it interesting
+- Does NOT restate or paraphrase the headline. The title is shown (and read aloud) immediately before your summary, so don't echo its wording or lead with the same fact — open with something new: context, a key detail, a consequence, or why it matters
 - Is NOT breathless, clickbaity, or dry
 
 OUTPUT FORMAT:
 Return a JSON array where each element has:
 - "index": the article's position in the input array (0-based)
-- "summary": your 1–2 sentence commentary
+- "summary": your 1–2 sentence commentary (shown on screen)
+- "spoken_title": the article's title, rewritten for a text-to-speech voice (see SPOKEN TEXT RULES)
+- "spoken_summary": your summary, rewritten the same way
+
+SPOKEN TEXT RULES (spoken_title and spoken_summary only):
+These two fields are read aloud by a neural text-to-speech voice that says exactly what it is given. Keep the wording and meaning identical to the original and change only what helps the voice say it naturally. If nothing needs changing, copy the text verbatim.
+- Acronyms spoken letter by letter: write them with periods so they aren't read as a word, e.g. "F.B.I.", "E.P.A.", "N.I.H.", "A.I.", "G.O.P.", "C.E.O.". Acronyms normally said as a word stay as-is, e.g. NASA, NATO, FEMA, OPEC, ICE, COVID.
+- Money, percentages, and units: "$4.2B" becomes "4.2 billion dollars", "$300M" becomes "300 million dollars", "15%" becomes "15 percent", "5 km" becomes "5 kilometers".
+- Abbreviations: write out titles and short forms, e.g. "Sen." becomes "Senator", "Gov." becomes "Governor", "Rep." becomes "Representative", "Dr." becomes "Doctor", "vs." becomes "versus", "No. 2" becomes "number 2", "Q3" becomes "third quarter".
+- Numbers said differently than written: Roman numerals ("World War II" becomes "World War Two", "Charles III" becomes "Charles the Third") and ranges ("2025–26" becomes "2025 to 2026").
+- Headline clutter: drop anything not meant to be spoken, such as a site name after a pipe or dash ("| Reuters", "- BBC News"), labels like "[Video]", "WATCH:" or "LIVE:", emoji, and ellipses.
+- Rhythm: replace colons, em dashes, and slashes with a comma or period where a newsreader would pause. End each field with a period, question mark, or exclamation point.
+- Never add commentary, change names, or alter facts.
 
 Return ONLY valid JSON. No explanation, no markdown fences, just the array."""
 
@@ -1224,6 +1240,8 @@ EDITORIAL GUIDELINES:
 - Skip stories that are just brief news alerts without substance
 - Ensure good category diversity — don't let one category dominate
 - When multiple sources cover the same story, pick the best source (prefer neutral wire services)
+- Only use local sources (like KETV-Omaha, Nebraska-Examiner, and Flatwater Free Press) when they're discussing news peculiar to Nebraska
+- Do not use local sources to cover U.S. and world events unless absolutely no other source is covering it
 
 OUTPUT FORMAT:
 Return a JSON array of integers — the indices (0-based) of your selected articles, ordered by editorial importance (most important first).
@@ -1269,6 +1287,8 @@ def generate_entries(articles_json: str, api_key: str) -> str:
     with client.messages.stream(
         model=ENRICHMENT_MODEL,
         max_tokens=64000,
+        # Haiku 5.5: thinking is on by default and counts toward max_tokens
+        output_config={"effort": "medium"},
         system=[
             {
                 "type": "text",
@@ -1290,6 +1310,13 @@ def generate_entries(articles_json: str, api_key: str) -> str:
     try:
         summaries_list = json.loads(strip_code_fences(enrichment_text))
         summary_map = {s["index"]: s["summary"] for s in summaries_list}
+        spoken_map = {
+            s["index"]: {
+                "title": s.get("spoken_title", ""),
+                "summary": s.get("spoken_summary", ""),
+            }
+            for s in summaries_list
+        }
         print(f"  Haiku wrote {len(summary_map)} summaries", file=sys.stderr)
     except (json.JSONDecodeError, KeyError) as e:
         print(f"  ⚠ Haiku enrichment parse failed: {e}", file=sys.stderr)
@@ -1316,7 +1343,10 @@ def generate_entries(articles_json: str, api_key: str) -> str:
     selection_text = ""
     with client.messages.stream(
         model=SELECTION_MODEL,
-        max_tokens=4000,
+        max_tokens=16000,
+        # Sonnet 5.5: thinking is adaptive by default and counts toward max_tokens
+        thinking={"type": "adaptive"},
+        output_config={"effort": "medium"},
         system=[
             {
                 "type": "text",
@@ -1469,6 +1499,7 @@ def generate_entries(articles_json: str, api_key: str) -> str:
         "articles_list": articles_list,
         "selected_indices": selected_indices,
         "summary_map": summary_map,
+        "spoken_map": spoken_map,
     }
 
 
@@ -1560,8 +1591,24 @@ def build_html(entries_html: str, archive_dir: str = None) -> str:
     return html
 
 
+# How each feed's source name should be said aloud ("From [name], ...").
+# Anything not listed is spoken as-is.
+SPOKEN_SOURCE_NAMES = {
+    "BBC News": "the B.B.C.", "BBC U.S.": "the B.B.C.", "BBC Science": "the B.B.C.",
+    "NPR World": "N.P.R.", "NPR U.S.": "N.P.R.", "NPR Politics": "N.P.R.",
+    "NPR Science": "N.P.R.", "NPR Technology": "N.P.R.",
+    "Associated Press": "the Associated Press",
+    "PBS NewsHour": "P.B.S. NewsHour",
+    "KETV Omaha": "K.E.T.V. Omaha",
+    "Yale E360": "Yale Environment 360",
+    "LISNews": "L.I.S. News",
+    "librarian.net": "librarian dot net",
+    "American Libraries": "American Libraries magazine",
+}
+
+
 def build_audio_data(articles_list: list, selected_indices: list,
-                     summary_map: dict) -> list:
+                     summary_map: dict, spoken_map: dict = None) -> list:
     """Extract structured article data for the audio edition."""
     source_key_map = {
         "bbc-news": "bbc-news", "bbc-us": "bbc-news", "bbc-science": "bbc-news",
@@ -1585,6 +1632,7 @@ def build_audio_data(articles_list: list, selected_indices: list,
             continue
         a = articles_list[idx]
         summary = summary_map.get(idx, "")
+        spoken = (spoken_map or {}).get(idx, {})
         source = a.get("source", "")
         source_key = source.lower().replace(" ", "-").replace(".", "").replace("'", "")
         source_key = source_key_map.get(source_key, source_key)
@@ -1596,6 +1644,9 @@ def build_audio_data(articles_list: list, selected_indices: list,
             "title": a.get("title", ""),
             "category_label": a.get("category_label", ""),
             "commentary": summary,
+            "spoken_title": spoken.get("title") or a.get("title", ""),
+            "spoken_summary": spoken.get("summary") or summary,
+            "spoken_source": SPOKEN_SOURCE_NAMES.get(source, source),
             "source": source,
             "url": a.get("link", "#"),
             "topic": a.get("category", "us"),
@@ -1661,8 +1712,15 @@ def generate_tts_audio(audio_articles: list, output_dir: str,
     for i, article in enumerate(audio_articles):
         filename = f"{i:02d}.mp3"
         filepath = os.path.join(output_dir, filename)
-        # Compose the spoken text: category, title, then commentary
-        spoken = f"{article['category_label']}. {article['title']}. {article['commentary']}"
+        # Compose the spoken text: "From [source], [title]. [commentary]"
+        # Uses Haiku's TTS-friendly rewrites when present, display text otherwise
+        title = (article.get('spoken_title') or article['title']).strip()
+        if title and title[-1] not in ".?!":
+            title += "."
+        source_name = article.get('spoken_source') or article.get('source')
+        prefix = f"From {source_name}, " if source_name else ""
+        body = article.get('spoken_summary') or article['commentary']
+        spoken = f"{prefix}{title} {body}"
         if _tts_single(spoken, filepath, tts_url, ha_url, headers):
             article["audio_file"] = filename
             success_count += 1
@@ -1801,6 +1859,7 @@ def main():
             result["articles_list"],
             result["selected_indices"],
             result["summary_map"],
+            result.get("spoken_map"),
         )
     else:
         entries_html = result

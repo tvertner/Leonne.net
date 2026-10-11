@@ -57,30 +57,36 @@ def deploy():
     if not html or len(html.strip()) < 100:
         return jsonify({"error": "No HTML content or content too short"}), 400
 
+    # Allow deploying different files (index.html, listen.html)
+    filename = request.args.get("filename", "index.html")
+    ALLOWED_FILES = {"index.html", "listen.html"}
+    if filename not in ALLOWED_FILES:
+        return jsonify({"error": "Invalid filename"}), 400
+
     try:
         # Ensure directories exist
         WEB_ROOT.mkdir(parents=True, exist_ok=True)
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
-        index_path = WEB_ROOT / "index.html"
+        target_path = WEB_ROOT / filename
 
-        # Backup current edition if it exists
-        if index_path.exists():
+        # Backup current edition if it exists (only for index.html)
+        if filename == "index.html" and target_path.exists():
             timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
             backup_path = BACKUP_DIR / f"edition_{timestamp}.html"
-            index_path.rename(backup_path)
+            target_path.rename(backup_path)
 
             # Keep only the last 30 backups
             backups = sorted(BACKUP_DIR.glob("edition_*.html"))
             for old in backups[:-30]:
                 old.unlink()
 
-        # Write new edition
-        index_path.write_text(html, encoding="utf-8")
+        # Write new file
+        target_path.write_text(html, encoding="utf-8")
 
         return jsonify({
             "status": "ok",
-            "message": "Edition deployed",
+            "message": f"{filename} deployed",
             "timestamp": datetime.now().isoformat()
         }), 200
 

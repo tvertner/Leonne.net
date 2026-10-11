@@ -59,9 +59,9 @@ STORY_COUNT_MIN = int(os.environ.get("STORY_COUNT_MIN", "35"))
 STORY_COUNT_MAX = int(os.environ.get("STORY_COUNT_MAX", "50"))
 
 # Models used in the editorial pipeline
-ENRICHMENT_MODEL = os.environ.get("ENRICHMENT_MODEL", "claude-haiku-4-5-20251001")
-SELECTION_MODEL = os.environ.get("SELECTION_MODEL", "claude-sonnet-4-5-20250929")
-FALLBACK_MODEL = os.environ.get("FALLBACK_MODEL", "claude-haiku-4-5-20251001")
+ENRICHMENT_MODEL = os.environ.get("ENRICHMENT_MODEL", "claude-haiku-5-5")
+SELECTION_MODEL = os.environ.get("SELECTION_MODEL", "claude-sonnet-5-5")
+FALLBACK_MODEL = os.environ.get("FALLBACK_MODEL", "claude-haiku-5-5")
 
 # ---------------------------------------------------------------------------
 # LOCAL SOURCES
